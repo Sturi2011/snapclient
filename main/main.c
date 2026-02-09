@@ -338,6 +338,19 @@ static FLAC__StreamDecoderWriteStatus write_callback(
       vTaskDelay(pdMS_TO_TICKS(5));
       //return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
+#if 0     // enable heap usage profiling
+    else {
+      static size_t largestFreeBlockMin = 10000000;
+      size_t largestFreeBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      static size_t freeSizeMin = 10000000;
+      if (largestFreeBlock < largestFreeBlockMin) {
+        largestFreeBlockMin = largestFreeBlock;
+        ESP_LOGI(TAG, "%s, free heap %u, largest block %u", __func__,
+                                                            heap_caps_get_free_size(MALLOC_CAP_8BIT), 
+                                                            largestFreeBlockMin);
+      }
+    }
+#endif
   } while(!pcmData);
   
   pcmChunk.outData = pcmData;
@@ -1570,6 +1583,7 @@ static void http_get_task(void *pvParameters) {
                               scSet.chkInFrames =
                                   FLAC__stream_decoder_get_blocksize(
                                       flacDecoder);
+                              
 
                               // ESP_LOGE (TAG, "block size: %ld",
                               // scSet.chkInFrames * scSet.bits / 8 * scSet.ch);
