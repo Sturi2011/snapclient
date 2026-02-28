@@ -545,7 +545,7 @@ void audio_set_volume(int volume) {
 /**
  *
  */
-int server_settings_msg_received(
+void server_settings_msg_received(
     server_settings_message_t *server_settings_message,
     snapcastSetting_t *scSet) {
   // log mute state, buffer, latency
@@ -587,17 +587,17 @@ int server_settings_msg_received(
              "Failed to notify sync task. "
              "Did you init player?");
 
-    return -1;  // fatal, this triggers return from http_get_task
+    // critical error
+    esp_restart();
   }
-  return 0;
 }
 
 /**
  *
  */
-int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
-                          codec_type_t codec, snapcastSetting_t *scSet,
-                          time_sync_data_t *time_sync_data) {
+void codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
+                           codec_type_t codec, snapcastSetting_t *scSet,
+                           time_sync_data_t *time_sync_data) {
   // first ensure everything is set up
   // correctly and resources are
   // available
@@ -634,7 +634,8 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
     opusDecoder = opus_decoder_create(scSet->sr, scSet->ch, &error);
     if (error != 0) {
       ESP_LOGI(TAG, "Failed to init opus coder");
-      return -1;
+      //critical error
+      esp_restart();
     }
 
     ESP_LOGI(TAG, "Initialized opus Decoder: %d", error);
@@ -651,7 +652,8 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
     flacDecoder = FLAC__stream_decoder_new();
     if (flacDecoder == NULL) {
       ESP_LOGE(TAG, "Failed to init flac decoder");
-      return -1;
+      //critical error
+      esp_restart();
     }
 
     FLAC__StreamDecoderInitStatus init_status =
@@ -662,7 +664,8 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
       ESP_LOGE(TAG, "ERROR: initializing decoder: %s\n",
                FLAC__StreamDecoderInitStatusString[init_status]);
 
-      return -1;
+      //critical error
+      esp_restart();
     }
 
     FLAC__stream_decoder_process_until_end_of_metadata(flacDecoder);
@@ -691,7 +694,8 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
              "shouldn't get here after "
              "codec string was detected");
 
-    return -1;
+    //critical error
+    esp_restart();
   }
 
   if (player_send_snapcast_setting(scSet) != pdPASS) {
@@ -699,7 +703,8 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
              "Failed to notify sync task. "
              "Did you init player?");
 
-    return -1;
+    //critical error
+    esp_restart();
   }
 
   // ESP_LOGI(TAG, "done codec header msg");
@@ -709,15 +714,14 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
   //   esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
   //                            time_sync_data->timeout);
   // }
-  return 0;
 }
 
 /**
  *
  */
-int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
-                         pcm_chunk_message_t **pcmData,
-                         wire_chunk_message_t *wire_chnk) {
+void handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
+                          pcm_chunk_message_t **pcmData,
+                          wire_chunk_message_t *wire_chnk) {
   switch (codec) {
     case OPUS: {
       int frame_size = -1;
@@ -813,7 +817,8 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
                  "codec. Did you "
                  "init player?");
 
-        return -1;
+        // critical error
+        esp_restart();
       }
 
       break;
@@ -919,7 +924,8 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
                  "codec. Did you "
                  "init player?");
 
-        return -1;
+        // critical error
+        esp_restart();
       }
 
       break;
@@ -950,7 +956,8 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
                  "codec. Did you "
                  "init player?");
 
-        return -1;
+        // critical error
+        esp_restart();
       }
 
 #if CONFIG_USE_DSP_PROCESSOR
@@ -970,23 +977,21 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
     }
 
     default: {
-      ESP_LOGE(TAG,
-               "Decoder (2) not "
-               "supported");
-
-      return -1;
+      // This should not happen, because codec header message should have been
+      // parsed before and codec should have been set to a supported value.
+      ESP_LOGE(TAG, "Decoder (2) not supported. This should never happen!");
+      // critical error
+      esp_restart();
 
       break;
     }
   }
-  return 0;
 }
 
 /*
  * returns:
  * 0 if a message was (partially) processed sucessfully
- * -1 if a critial error occured
- * -2 if network needs restart
+ * -1 if network needs restart
  */
 int process_data(snapcast_protocol_parser_t *parser,
                  time_sync_data_t *time_sync_data, bool *received_codec_header,
@@ -994,68 +999,41 @@ int process_data(snapcast_protocol_parser_t *parser,
                  pcm_chunk_message_t **pcmData) {
   base_message_t base_message_rx;
 
-  if (parse_base_message(parser, &base_message_rx) == PARSER_COMPLETE) {
-    time_sync_data->now = esp_timer_get_time();
-    base_message_rx.received.sec = time_sync_data->now / 1000000;
-    base_message_rx.received.usec =
-        time_sync_data->now - base_message_rx.received.sec * 1000000;
-  } else {  // PARSER_CONNECTION_ERROR (only these two cases for base message)
-    return -2;  // restart connection
+  if (parse_base_message(parser, &base_message_rx) != PARSER_OK) {
+    return -1;  // restart connection
   }
+  time_sync_data->now = esp_timer_get_time();
+  base_message_rx.received.sec = time_sync_data->now / 1000000;
+  base_message_rx.received.usec =
+      time_sync_data->now - base_message_rx.received.sec * 1000000;
 
   switch (base_message_rx.type) {
     case SNAPCAST_MESSAGE_WIRE_CHUNK: {
-      wire_chunk_message_t wire_chnk = {
-          {0, 0}, 0, NULL};  // is wire_chnk.payload ever used?
-      switch (parse_wire_chunk_message(parser, &base_message_rx,
-                                       *received_codec_header, *codec, pcmData,
-                                       &wire_chnk, &decoderChunk)) {
-        case PARSER_COMPLETE: {
-          if (handle_chunk_message(*codec, scSet, pcmData, &wire_chnk) != 0) {
-            return -1;
-          }
-          break;
-        }
-        case PARSER_CRITICAL_ERROR: {
+      wire_chunk_message_t wire_chnk = {{0, 0}, 0, NULL};  // is wire_chnk.payload ever used?
+
+      // skip this wires chunk message if codec header message was not received yet!
+      if (*received_codec_header == false) {
+        if (parser_skip_typed_message(parser, &base_message_rx) != PARSER_OK) {
           return -1;
         }
-        case PARSER_INCOMPLETE: {
-          // need more data
-          return 0;
-        }
-        case PARSER_CONNECTION_ERROR: {
-          return -2;
-        }
+        return 0;
       }
-      break;
+
+      if (parse_wire_chunk_message(parser, &base_message_rx, *codec, pcmData, &wire_chnk, &decoderChunk) != PARSER_OK) {
+        return -1;
+      }
+      handle_chunk_message(*codec, scSet, pcmData, &wire_chnk);
+      return 0;
     }
 
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
       char *codecPayload = NULL;
       uint32_t codecPayloadLen = 0;
       int return_value = 0;
-      switch (parse_codec_header_message(parser, received_codec_header, codec,
-                                         &codecPayload, &codecPayloadLen)) {
-        case PARSER_COMPLETE: {
-          if (codec_header_received(codecPayload, codecPayloadLen, *codec,
-                                    scSet, time_sync_data) != 0) {
-            return_value = -1;
-          }
-          break;
-        }
-        case PARSER_CRITICAL_ERROR: {
-          return_value = -1;
-          break;
-        }
-        case PARSER_CONNECTION_ERROR: {
-          return_value = -2;
-          break;
-        }
-        case PARSER_INCOMPLETE: {
-          // should not happen
-          // need more data
-          break;
-        }
+      if (parse_codec_header_message(parser, received_codec_header, codec, &codecPayload, &codecPayloadLen) != PARSER_OK) {
+        return_value = -1;
+      } else {
+        codec_header_received(codecPayload, codecPayloadLen, *codec, scSet, time_sync_data);
       }
 
       // in all cases: free Payload
@@ -1068,53 +1046,30 @@ int process_data(snapcast_protocol_parser_t *parser,
 
     case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
       server_settings_message_t server_settings_message;
-      parser_return_state_t result = parse_sever_settings_message(
-          parser, &base_message_rx, &server_settings_message);
-      switch (result) {
-        case PARSER_COMPLETE: {
-          if (server_settings_msg_received(&server_settings_message, scSet) !=
-              0) {
-            return -1;
-          }
-          break;
-        }
-        case PARSER_CRITICAL_ERROR: {
-          return -1;
-        }
-        case PARSER_CONNECTION_ERROR: {
-          return -2;
-        }
-        case PARSER_INCOMPLETE: {
-          // should not happen
-          // need more data
-          break;
-        }
+      if (parse_sever_settings_message(parser, &base_message_rx, &server_settings_message) != PARSER_OK) {
+        return -1;
       }
-      break;
+      server_settings_msg_received(&server_settings_message, scSet);
+      return 0;
     }
 
     case SNAPCAST_MESSAGE_TIME: {
       time_message_t time_message_rx;
-      parser_return_state_t result =
-          parse_time_message(parser, &base_message_rx, &time_message_rx);
-      if (result == PARSER_COMPLETE) {
-        time_sync_msg_received(&base_message_rx, &time_message_rx,
-                               time_sync_data, *received_codec_header);
-      } else if (result == PARSER_CONNECTION_ERROR) {
-        return -2;
-      }  // could also be "incomplete", i.e. ignore content
-      break;
+      if (parse_time_message(parser, &base_message_rx, &time_message_rx) != PARSER_OK) {
+        return -1;
+      }
+      time_sync_msg_received(&base_message_rx, &time_message_rx, time_sync_data, *received_codec_header);
+      return 0;
     }
 
     default: {
-      if (parse_unknown_message(parser, &base_message_rx) ==
-          PARSER_CONNECTION_ERROR) {
-        return -2;
+      if (parser_skip_typed_message(parser, &base_message_rx) != PARSER_OK) {
+        return -1;
       }
-      break;
+      return 0;
     }
   }
-
+  // should never reach this
   return 0;
 }
 
@@ -1169,7 +1124,7 @@ static void http_get_task(void *pvParameters) {
   if (idCounterSemaphoreHandle == NULL) {
     ESP_LOGE(TAG, "can't create id Counter Semaphore");
 
-    return;
+    esp_restart();
   }
 
   while (1) {
@@ -1271,7 +1226,8 @@ static void http_get_task(void *pvParameters) {
           &hello_message, (size_t *)&(base_message_rx.size));
       if (!hello_message_serialized) {
         ESP_LOGE(TAG, "Failed to serialize hello message");
-        return;
+        // critical error
+        esp_restart();
       }
     }
 
@@ -1279,7 +1235,8 @@ static void http_get_task(void *pvParameters) {
                                     BASE_MESSAGE_SIZE);
     if (result) {
       ESP_LOGE(TAG, "Failed to serialize base message");
-      return;
+      // critical error
+      esp_restart();
     }
 
     rc1 = netconn_write(lwipNetconn, base_message_serialized, BASE_MESSAGE_SIZE,
@@ -1338,9 +1295,7 @@ static void http_get_task(void *pvParameters) {
       int result =
           process_data(&parser, &time_sync_data, &received_codec_header, &codec,
                        &scSet, &pcmData);
-      if (result == -1) {
-        return;  // critical error in data processing
-      } else if (result == -2) {
+      if (result != 0) {
         break;  // restart connection
       }
     }
