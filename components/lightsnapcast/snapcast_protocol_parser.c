@@ -4,73 +4,65 @@
 #include "freertos/task.h" // for vTaskDelay
 #include <string.h>
 
-// MACROS for reading from connection
-#define READ_BYTE(parser, dest) \
-  do { \
-    char _byte; \
-    if ((parser)->get_byte_function((parser)->get_byte_context, &_byte) != 0) { \
-      return PARSER_RESTART_CONNECTION; \
-    } \
-    (dest) = _byte; \
-  } while(0)
+// Returns true on success, false if connection should restart
+static inline bool read_byte(snapcast_protocol_parser_t *parser, char *dest) {
+    char byte;
+    if (parser->get_byte_function(parser->get_byte_context, &byte) != 0) {
+        return false;
+    }
+    *dest = byte;
+    return true;
+}
 
-#define READ_UINT16_LE(parser, dest) \
-  do { \
-    char _bytes[2]; \
-    if ((parser)->get_byte_function((parser)->get_byte_context, &_bytes[0]) != 0 || \
-        (parser)->get_byte_function((parser)->get_byte_context, &_bytes[1]) != 0) { \
-      return PARSER_RESTART_CONNECTION; \
-    } \
-    (dest) = (_bytes[0] & 0xFF) | ((_bytes[1] & 0xFF) << 8); \
-  } while(0)
+static inline bool read_uint16_le(snapcast_protocol_parser_t *parser, uint16_t *dest) {
+    char bytes[2];
+    for (int i = 0; i < 2; i++) {
+        if (parser->get_byte_function(parser->get_byte_context, &bytes[i]) != 0) {
+            return false;
+        }
+    }
+    *dest = (uint16_t)((bytes[0] & 0xFF) | ((bytes[1] & 0xFF) << 8));
+    return true;
+}
 
-#define READ_UINT32_LE(parser, dest) \
-  do { \
-    char _bytes[4]; \
-    for (int _i = 0; _i < 4; _i++) { \
-      if ((parser)->get_byte_function((parser)->get_byte_context, &_bytes[_i]) != 0) { \
-        return PARSER_RESTART_CONNECTION; \
-      } \
-    } \
-    (dest) = (_bytes[0] & 0xFF) | ((_bytes[1] & 0xFF) << 8) | \
-             ((_bytes[2] & 0xFF) << 16) | ((_bytes[3] & 0xFF) << 24); \
-  } while(0)
+static inline bool read_uint32_le(snapcast_protocol_parser_t *parser, uint32_t *dest) {
+    char bytes[4];
+    for (int i = 0; i < 4; i++) {
+        if (parser->get_byte_function(parser->get_byte_context, &bytes[i]) != 0) {
+            return false;
+        }
+    }
+    *dest = (uint32_t)(  (bytes[0] & 0xFF)
+                       | ((bytes[1] & 0xFF) <<  8)
+                       | ((bytes[2] & 0xFF) << 16)
+                       | ((bytes[3] & 0xFF) << 24));
+    return true;
+}
 
-#define READ_TIMESTAMP(parser, ts) \
-  do { \
-    READ_UINT32_LE(parser, (ts).sec); \
-    READ_UINT32_LE(parser, (ts).usec); \
-  } while(0)
+static inline bool read_timestamp(snapcast_protocol_parser_t *parser, tv_t *ts) {
+    return read_uint32_le(parser, (uint32_t *)&ts->sec) &&
+           read_uint32_le(parser, (uint32_t *)&ts->usec);
+}
 
-#define READ_DATA(parser, dest, len) \
-  do { \
-    for (uint32_t _i = 0; _i < (len); _i++) { \
-      if ((parser)->get_byte_function((parser)->get_byte_context, &(dest)[_i]) != 0) { \
-        return PARSER_RESTART_CONNECTION; \
-      } \
-    } \
-  } while(0)
-
-#define READ_DATA_WITH_CLEANUP(parser, dest, len, cleanup) \
-  do { \
-    for (uint32_t _i = 0; _i < (len); _i++) { \
-      if ((parser)->get_byte_function((parser)->get_byte_context, &(dest)[_i]) != 0) { \
-        cleanup; \
-        return PARSER_RESTART_CONNECTION; \
-      } \
-    } \
-  } while(0)
+static inline bool read_data(snapcast_protocol_parser_t *parser, uint8_t *dest, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        if (parser->get_byte_function(parser->get_byte_context, (char *)&dest[i]) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
 
 static const char* TAG = "SNAPCAST_PROTOCOL_PARSER";
 
 parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx) {
-  READ_UINT16_LE(parser, base_message_rx->type);
-  READ_UINT16_LE(parser, base_message_rx->id);
-  READ_UINT16_LE(parser, base_message_rx->refersTo);
-  READ_TIMESTAMP(parser, base_message_rx->sent);
-  READ_TIMESTAMP(parser, base_message_rx->received);
-  READ_UINT32_LE(parser, base_message_rx->size);
+  if (!read_uint16_le(parser, &base_message_rx->type)) return PARSER_RESTART_CONNECTION;
+  if (!read_uint16_le(parser, &base_message_rx->id)) return PARSER_RESTART_CONNECTION;
+  if (!read_uint16_le(parser, &base_message_rx->refersTo)) return PARSER_RESTART_CONNECTION;
+  if (!read_timestamp(parser, &base_message_rx->sent)) return PARSER_RESTART_CONNECTION;
+  if (!read_timestamp(parser, &base_message_rx->received)) return PARSER_RESTART_CONNECTION;
+  if (!read_uint32_le(parser, &base_message_rx->size)) return PARSER_RESTART_CONNECTION;
 
   return PARSER_OK;
 }
@@ -84,8 +76,8 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
                                                wire_chunk_message_t* wire_chnk,
                                                decoderData_t* decoderChunk) {
 
-  READ_TIMESTAMP(parser, wire_chnk->timestamp);
-  READ_UINT32_LE(parser, wire_chnk->size);
+  if (!read_timestamp(parser, &wire_chnk->timestamp)) return PARSER_RESTART_CONNECTION;
+  if (!read_uint32_le(parser, (uint32_t *)&wire_chnk->size)) return PARSER_RESTART_CONNECTION;
 
   // TODO: we could use wire chunk directly maybe?
   decoderChunk->bytes = wire_chnk->size;
@@ -109,7 +101,7 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
   switch (codec) {
     case OPUS:
     case FLAC: {
-      READ_DATA(parser, (char*)decoderChunk->inData, tmp_size);
+      if (!read_data(parser, decoderChunk->inData, tmp_size)) return PARSER_RESTART_CONNECTION;
       payloadOffset += tmp_size;
       decoderChunk->outData = NULL;
       decoderChunk->type = SNAPCAST_MESSAGE_WIRE_CHUNK;
@@ -132,7 +124,8 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
 
       while (_tmp--) {
         char tmp_val;
-        READ_BYTE(parser, tmp_val);
+        if (!read_byte(parser, &tmp_val)) return PARSER_RESTART_CONNECTION;
+        
         tmpData |= ((uint32_t)tmp_val << (8 * payloadDataShift));
 
         payloadDataShift--;
@@ -192,12 +185,13 @@ parser_return_state_t parse_codec_header_message(
   *received_codec_header = false;
 
   uint32_t codecStringLen = 0;
-  READ_UINT32_LE(parser, codecStringLen);
+  if (!read_uint32_le(parser, &codecStringLen)) return PARSER_RESTART_CONNECTION;
 
   char codecString[8]; // longest supported string has 4 + 1 chars
 
   if (codecStringLen + 1 > sizeof(codecString)) {
-    READ_DATA(parser, codecString, sizeof(codecString)-1);
+    if (!read_data(parser, (uint8_t *)codecString, sizeof(codecString)-1)) return PARSER_RESTART_CONNECTION;
+    
     codecString[sizeof(codecString)-1] = 0; // null terminate
     ESP_LOGE(TAG, "Codec : %s... not supported", codecString);
     ESP_LOGI(TAG,
@@ -208,7 +202,7 @@ parser_return_state_t parse_codec_header_message(
     // restart connection
     return PARSER_RESTART_CONNECTION;
   }
-  READ_DATA(parser, codecString, codecStringLen);
+  if (!read_data(parser, (uint8_t *)codecString, codecStringLen)) return PARSER_RESTART_CONNECTION;
 
   // NULL terminate string
   codecString[codecStringLen] = 0;
@@ -235,8 +229,7 @@ parser_return_state_t parse_codec_header_message(
     return PARSER_RESTART_CONNECTION;
   }
 
-  //
-  READ_UINT32_LE(parser, *codecPayloadLen);
+  if (!read_uint32_le(parser, codecPayloadLen)) return PARSER_RESTART_CONNECTION;
 
   *codecPayload = malloc(*codecPayloadLen);  // allocate memory
                                              // for codec payload
@@ -249,7 +242,7 @@ parser_return_state_t parse_codec_header_message(
     esp_restart();
   }
 
-  READ_DATA(parser, *codecPayload, *codecPayloadLen);
+  if (!read_data(parser, (uint8_t *)*codecPayload, *codecPayloadLen)) return PARSER_RESTART_CONNECTION;
 
   *received_codec_header = true;
 
@@ -261,7 +254,7 @@ parser_return_state_t parse_sever_settings_message(
     server_settings_message_t* server_settings_message) {
   uint32_t typedMsgLen;
   char* serverSettingsString = NULL;
-  READ_UINT32_LE(parser, typedMsgLen);
+  if (!read_uint32_le(parser, &typedMsgLen)) return PARSER_RESTART_CONNECTION;
 
   // ESP_LOGI(TAG,"server settings string is %lu long", typedMsgLen);
 
@@ -278,10 +271,12 @@ parser_return_state_t parse_sever_settings_message(
   size_t tmpSize = base_message_rx->size - 4;
   // TODO: should there be an assert that tmpSize <= typedMsgLen?
 
-  READ_DATA_WITH_CLEANUP(parser, serverSettingsString, tmpSize,
-    free(serverSettingsString) // This will be executed on error before returning
-  );
-
+  if (!read_data(parser, (uint8_t *)serverSettingsString, tmpSize)) {
+    free(serverSettingsString);
+    
+    return PARSER_RESTART_CONNECTION;
+  }
+  
   serverSettingsString[typedMsgLen] = 0;
 
   // ESP_LOGI(TAG, "got string: %s",
@@ -311,7 +306,7 @@ parser_return_state_t parse_sever_settings_message(
 parser_return_state_t parse_time_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx,
                                          time_message_t* time_message_rx) {
-  READ_TIMESTAMP(parser, time_message_rx->latency);
+  if (!read_timestamp(parser, &time_message_rx->latency)) return PARSER_RESTART_CONNECTION;
 
   if (base_message_rx->size < 8) { // TODO: how to handle this case? Do we NEED to check?
     ESP_LOGE(TAG,
@@ -329,7 +324,7 @@ parser_return_state_t parser_skip_typed_message(snapcast_protocol_parser_t* pars
   // For unknown messages, we need to consume all remaining bytes
   char dummy_byte;
   for (uint32_t i = 0; i < base_message_rx->size; i++) {
-    READ_BYTE(parser, dummy_byte);
+    if (!read_byte(parser, &dummy_byte)) return PARSER_RESTART_CONNECTION;
   }
 
   ESP_LOGI(TAG, "done skipping typed message %d", base_message_rx->type);
