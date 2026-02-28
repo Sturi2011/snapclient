@@ -33,6 +33,8 @@
 #include "network_interface.h"
 #include "nvs_flash.h"
 
+#include "esp32_udp_logger.h"
+
 // Web socket server
 // #include "websocket_if.h"
 // #include "websocket_server.h"
@@ -1395,6 +1397,8 @@ void app_main(void) {
   gpio_config(&cfg);
 #endif
 
+  network_if_init();
+
   board_i2s_pin_t pin_config0;
   get_i2s_pins(I2S_NUM_0, &pin_config0);
 
@@ -1509,17 +1513,20 @@ void app_main(void) {
   }
   #endif
 
-  network_if_init();
-
   // Initialize settings manager (hostname + snapserver settings)
   settings_manager_init();
-
+  
   // Get hostname for mDNS
   char mdns_hostname[64] = {0};
   if (settings_get_hostname(mdns_hostname, sizeof(mdns_hostname)) != ESP_OK) {
     strncpy(mdns_hostname, "snapclient", sizeof(mdns_hostname) - 1);
   }
   ESP_LOGI(TAG, "Device hostname: %s", mdns_hostname);
+  
+  #if CONFIG_ESP32_UDP_LOGGER_ENABLED
+  esp32_udp_logger_set_hostname(mdns_hostname);
+  esp32_udp_logger_autostart();
+  #endif
 
   init_http_server_task();
 
