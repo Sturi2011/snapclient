@@ -1524,7 +1524,7 @@ void app_main(void) {
   ESP_LOGI(TAG, "Device hostname: %s", mdns_hostname);
   
   #if CONFIG_ESP32_UDP_LOGGER_ENABLED
-  esp32_udp_logger_set_hostname(mdns_hostname);
+//  esp32_udp_logger_set_hostname(mdns_hostname);
   esp32_udp_logger_autostart();
   #endif
 
