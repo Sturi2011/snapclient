@@ -218,7 +218,7 @@ Update your client(s) over the air.
 
 >Note:<br>
 >In commits [98c439d](https://github.com/CarlosDerSeher/snapclient/commit/98c439d) and [4fcf3a6](https://github.com/CarlosDerSeher/snapclient/commit/4fcf3a6) the partition table has been altered,
-so there is a chance that systems running versions of the Firmware < v0.0.3 will encounter troubles during OTA upgrade. In tests we found OTA
+so there is a chance that systems running versions of the Firmware < v0.0.3 (before 2025-12-28 22:58:54) will encounter troubles during OTA upgrade. In tests we found OTA
 works without any issues but it hasn't been tested for every possible hardware combination. So be prepared to flash using serial connection if
 something goes sideways.
 
