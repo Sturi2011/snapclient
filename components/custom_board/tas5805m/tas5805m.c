@@ -222,7 +222,7 @@ esp_err_t tas5805m_read_bytes(uint8_t *reg, int regLen, uint8_t *data, int datal
     return ret;
   }
 
-  vTaskDelay(pdMS_TO_TICKS(1);
+  vTaskDelay(pdMS_TO_TICKS(1));
   
   cmd = i2c_cmd_link_create();
   ret |= i2c_master_start(cmd);
@@ -301,7 +301,7 @@ esp_err_t tas5805m_init() {
   BaseType_t task_ret = xTaskCreate(
     tas5805m_fault_monitor_task,
     "tas5805m_faults",
-    2048,
+    3072,
     NULL,
     5,
     &tas5805m_fault_monitor_task_handle
