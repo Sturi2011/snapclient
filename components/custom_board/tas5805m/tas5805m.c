@@ -139,7 +139,7 @@ esp_err_t tas5805m_read_byte(uint8_t register_name, uint8_t *data) {
     ESP_LOGW(TAG, "%s: I2C ERROR", __func__);
   }
 
-  vTaskDelay(1 / portTICK_PERIOD_MS);
+  vTaskDelay(pdMS_TO_TICKS(1));
   cmd = i2c_cmd_link_create();
   i2c_master_start(cmd);
   i2c_master_write_byte(cmd, TAS5805M_ADDRESS << 1 | READ_BIT, ACK_CHECK_EN);
