@@ -301,7 +301,7 @@ esp_err_t tas5805m_init() {
   BaseType_t task_ret = xTaskCreate(
     tas5805m_fault_monitor_task,
     "tas5805m_faults",
-    3072,
+    2560,
     NULL,
     5,
     &tas5805m_fault_monitor_task_handle
